@@ -1,10 +1,14 @@
 import type { Express } from "express";
 import { createServer, type Server } from "http";
+import multer from "multer";
+import { Readable } from "stream";
 import { storage } from "./storage";
-import { generateChartInsight, generateDashboardRecommendations, chatbotResponse } from "./services/openai";
+import { generateChartInsight, generateDashboardRecommendations, chatbotResponse } from "./services/ai";
 import { generateSampleProducts, generateSampleAnalytics } from "./services/productGenerator";
 import { insertUserSchema, insertChatMessageSchema } from "@shared/schema";
 import { z } from "zod";
+
+const upload = multer({ storage: multer.memoryStorage() });
 
 export async function registerRoutes(app: Express): Promise<Server> {
   // Initialize sample data if products don't exist
@@ -140,6 +144,24 @@ export async function registerRoutes(app: Express): Promise<Server> {
     } catch (error) {
       console.error("Error searching products:", error);
       res.status(500).json({ message: "Failed to search products" });
+    }
+  });
+
+  app.post("/api/products/import-csv", upload.single("file"), async (req, res) => {
+    if (!req.file) {
+      return res.status(400).json({ message: "No file uploaded" });
+    }
+
+    try {
+      const readable = new Readable();
+      readable.push(req.file.buffer);
+      readable.push(null);
+
+      const count = await storage.importProductsFromCsv(readable);
+      res.json({ message: `Successfully imported ${count} products` });
+    } catch (error) {
+      console.error("Error importing CSV:", error);
+      res.status(500).json({ message: "Failed to import CSV data" });
     }
   });
 
@@ -308,6 +330,28 @@ export async function registerRoutes(app: Express): Promise<Server> {
     } catch (error) {
       console.error("Error updating user:", error);
       res.status(500).json({ message: "Failed to update user" });
+    }
+  });
+
+  app.patch("/api/user/:id/subscription", async (req, res) => {
+    try {
+      const { id } = req.params;
+      const { subscriptionTier } = req.body;
+
+      if (!subscriptionTier || !["free", "basic", "premium"].includes(subscriptionTier)) {
+        return res.status(400).json({ message: "Invalid subscription tier" });
+      }
+
+      const user = await storage.updateUser(id, { subscriptionTier });
+
+      if (!user) {
+        return res.status(404).json({ message: "User not found" });
+      }
+
+      res.json({ ...user, password: undefined });
+    } catch (error) {
+      console.error("Error updating subscription:", error);
+      res.status(500).json({ message: "Failed to update subscription" });
     }
   });
 
