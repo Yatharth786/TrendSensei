@@ -85,10 +85,27 @@ export default function Subscription() {
   const { user } = useAuth();
   const [selectedPlan, setSelectedPlan] = useState(user?.subscriptionTier || "free");
 
-  const handleUpgrade = (planId: string) => {
-    // In a real app, this would integrate with a payment processor
-    console.log(`Upgrading to ${planId} plan`);
-    setSelectedPlan(planId);
+  const { setUser } = useAuth();
+  const handleUpgrade = async (planId: string) => {
+    if (!user) return;
+
+    try {
+      const response = await fetch(`/api/user/${user.id}/subscription`, {
+        method: "PATCH",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ subscriptionTier: planId }),
+      });
+
+      if (response.ok) {
+        const updatedUser = await response.json();
+        setUser(updatedUser);
+        setSelectedPlan(planId);
+      } else {
+        console.error("Failed to update subscription");
+      }
+    } catch (error) {
+      console.error("Error updating subscription:", error);
+    }
   };
 
   return (

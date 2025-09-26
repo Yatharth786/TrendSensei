@@ -1,5 +1,16 @@
-import { type User, type InsertUser, type Product, type InsertProduct, type Analytics, type InsertAnalytics, type ChatMessage, type InsertChatMessage, type ProductWithMetrics, type CategoryPerformance, type GeographicData, type DashboardMetrics } from "@shared/schema";
+import { type User, type InsertUser, type Product, type InsertProduct, type Analytics, type InsertAnalytics, type ChatMessage, type InsertChatMessage, type ProductWithMetrics, type CategoryPerformance, type GeographicData, type DashboardMetrics, insertProductSchema } from "@shared/schema";
 import { randomUUID } from "crypto";
+import csv from "csv-parser";
+import { Readable } from "stream";
+import { neon } from "@neondatabase/serverless";
+import { drizzle } from "drizzle-orm/neon-http";
+import * as schema from "@shared/schema";
+import { products, users, chatMessages, analytics } from "@shared/schema";
+import { eq, and, desc, sql, gte, lte, ilike } from "drizzle-orm";
+
+const client = neon(process.env.DATABASE_URL!);
+export const db = drizzle(client, { schema });
+
 
 export interface IStorage {
   // User methods
@@ -17,6 +28,7 @@ export interface IStorage {
   getTrendingProducts(limit?: number): Promise<ProductWithMetrics[]>;
   getTopProfitProducts(limit?: number): Promise<ProductWithMetrics[]>;
   getUnderperformingProducts(limit?: number): Promise<ProductWithMetrics[]>;
+  importProductsFromCsv(stream: Readable): Promise<number>;
 
   // Analytics methods
   getAnalytics(productId?: string, startDate?: Date, endDate?: Date): Promise<Analytics[]>;
@@ -34,263 +46,227 @@ export interface IStorage {
   getProductCount(): Promise<number>;
 }
 
-export class MemStorage implements IStorage {
-  private users: Map<string, User>;
-  private products: Map<string, Product>;
-  private analytics: Map<string, Analytics>;
-  private chatMessages: Map<string, ChatMessage>;
-
-  constructor() {
-    this.users = new Map();
-    this.products = new Map();
-    this.analytics = new Map();
-    this.chatMessages = new Map();
-  }
-
-  // User methods
-  async getUser(id: string): Promise<User | undefined> {
-    return this.users.get(id);
-  }
-
-  async getUserByEmail(email: string): Promise<User | undefined> {
-    return Array.from(this.users.values()).find(user => user.email === email);
-  }
-
-  async createUser(insertUser: InsertUser): Promise<User> {
-    const id = randomUUID();
-    const user: User = { 
-      ...insertUser,
-      location: insertUser.location || null,
-      businessName: insertUser.businessName || null,
-      id, 
-      subscriptionTier: "free",
-      createdAt: new Date() 
-    };
-    this.users.set(id, user);
-    return user;
-  }
-
-  async updateUser(id: string, updates: Partial<User>): Promise<User | undefined> {
-    const user = this.users.get(id);
-    if (!user) return undefined;
-    
-    const updatedUser = { ...user, ...updates };
-    this.users.set(id, updatedUser);
-    return updatedUser;
-  }
-
-  // Product methods
-  async getProducts(limit = 50, offset = 0, filters?: any): Promise<Product[]> {
-    let products = Array.from(this.products.values());
-    
-    if (filters) {
-      if (filters.category) {
-        products = products.filter(p => p.category === filters.category);
-      }
-      if (filters.minPrice) {
-        products = products.filter(p => parseFloat(p.price) >= filters.minPrice);
-      }
-      if (filters.maxPrice) {
-        products = products.filter(p => parseFloat(p.price) <= filters.maxPrice);
-      }
-      if (filters.minRating) {
-        products = products.filter(p => parseFloat(p.rating) >= filters.minRating);
-      }
-      if (filters.location) {
-        products = products.filter(p => 
-          p.locationData && typeof p.locationData === 'object' && 
-          Object.keys(p.locationData).includes(filters.location.toLowerCase())
-        );
-      }
+export class DrizzleStorage implements IStorage {
+    // User methods
+    async getUser(id: string): Promise<User | undefined> {
+        const result = await db.select().from(users).where(eq(users.id, id));
+        return result[0];
     }
-    
-    return products.slice(offset, offset + limit);
-  }
 
-  async getProduct(id: string): Promise<Product | undefined> {
-    return this.products.get(id);
-  }
-
-  async createProduct(insertProduct: InsertProduct): Promise<Product> {
-    const id = randomUUID();
-    const product: Product = { 
-      ...insertProduct,
-      description: insertProduct.description || null,
-      trending: insertProduct.trending || false,
-      id, 
-      createdAt: new Date() 
-    };
-    this.products.set(id, product);
-    return product;
-  }
-
-  async updateProduct(id: string, updates: Partial<Product>): Promise<Product | undefined> {
-    const product = this.products.get(id);
-    if (!product) return undefined;
-    
-    const updatedProduct = { ...product, ...updates };
-    this.products.set(id, updatedProduct);
-    return updatedProduct;
-  }
-
-  async getProductsByCategory(category: string): Promise<Product[]> {
-    return Array.from(this.products.values()).filter(p => p.category === category);
-  }
-
-  async getTrendingProducts(limit = 10): Promise<ProductWithMetrics[]> {
-    const products = Array.from(this.products.values())
-      .filter(p => p.trending)
-      .sort((a, b) => b.salesVolume - a.salesVolume)
-      .slice(0, limit);
-
-    return products.map(p => ({
-      ...p,
-      salesGrowth: Math.random() * 50 + 10, // Mock growth percentage
-      revenueGrowth: Math.random() * 40 + 5,
-      competitivePosition: "leading"
-    }));
-  }
-
-  async getTopProfitProducts(limit = 10): Promise<ProductWithMetrics[]> {
-    const products = Array.from(this.products.values())
-      .sort((a, b) => parseFloat(b.profitMargin) - parseFloat(a.profitMargin))
-      .slice(0, limit);
-
-    return products.map(p => ({
-      ...p,
-      salesGrowth: Math.random() * 30 + 5,
-      revenueGrowth: Math.random() * 25 + 3,
-      competitivePosition: "profitable"
-    }));
-  }
-
-  async getUnderperformingProducts(limit = 10): Promise<ProductWithMetrics[]> {
-    const products = Array.from(this.products.values())
-      .sort((a, b) => a.salesVolume - b.salesVolume)
-      .slice(0, limit);
-
-    return products.map(p => ({
-      ...p,
-      salesGrowth: -(Math.random() * 30 + 5), // Negative growth
-      revenueGrowth: -(Math.random() * 25 + 3),
-      competitivePosition: "needs attention"
-    }));
-  }
-
-  // Analytics methods
-  async getAnalytics(productId?: string, startDate?: Date, endDate?: Date): Promise<Analytics[]> {
-    let analytics = Array.from(this.analytics.values());
-    
-    if (productId) {
-      analytics = analytics.filter(a => a.productId === productId);
+    async getUserByEmail(email: string): Promise<User | undefined> {
+        const result = await db.select().from(users).where(eq(users.email, email));
+        return result[0];
     }
-    
-    if (startDate) {
-      analytics = analytics.filter(a => a.date >= startDate);
+
+    async createUser(user: InsertUser): Promise<User> {
+        const result = await db.insert(users).values(user).returning();
+        return result[0];
     }
-    
-    if (endDate) {
-      analytics = analytics.filter(a => a.date <= endDate);
+
+    async updateUser(id: string, updates: Partial<User>): Promise<User | undefined> {
+        const result = await db.update(users).set(updates).where(eq(users.id, id)).returning();
+        return result[0];
     }
-    
-    return analytics;
-  }
 
-  async createAnalytics(insertAnalytics: InsertAnalytics): Promise<Analytics> {
-    const id = randomUUID();
-    const analytics: Analytics = { 
-      ...insertAnalytics,
-      productId: insertAnalytics.productId || null,
-      id 
-    };
-    this.analytics.set(id, analytics);
-    return analytics;
-  }
+    // Product methods
+    async getProducts(limit = 50, offset = 0, filters?: any): Promise<Product[]> {
+        const query = db.select().from(products).limit(limit).offset(offset);
+        const conditions = [];
+        if (filters) {
+            if (filters.category) {
+                conditions.push(eq(products.category, filters.category));
+            }
+            if (filters.minPrice) {
+                conditions.push(gte(products.price, filters.minPrice.toString()));
+            }
+            if (filters.maxPrice) {
+                conditions.push(lte(products.price, filters.maxPrice.toString()));
+            }
+            if (filters.minRating) {
+                conditions.push(gte(products.rating, filters.minRating.toString()));
+            }
+        }
+        if (conditions.length > 0) {
+            query.where(and(...conditions));
+        }
+        return query;
+    }
 
-  async getDashboardMetrics(): Promise<DashboardMetrics> {
-    const products = Array.from(this.products.values());
-    const analytics = Array.from(this.analytics.values());
-    
-    const totalRevenue = analytics.reduce((sum, a) => sum + parseFloat(a.revenue), 0);
-    const avgProfitMargin = products.reduce((sum, p) => sum + parseFloat(p.profitMargin), 0) / products.length;
-    const avgRating = products.reduce((sum, p) => sum + parseFloat(p.rating), 0) / products.length;
-    
-    return {
-      totalRevenue,
-      revenueGrowth: 12.3,
-      totalProducts: products.length,
-      productGrowth: 8.7,
-      avgProfitMargin,
-      marginGrowth: 2.1,
-      avgRating,
-      ratingGrowth: 0.3
-    };
-  }
+    async getProduct(id: string): Promise<Product | undefined> {
+        const result = await db.select().from(products).where(eq(products.id, id));
+        return result[0];
+    }
 
-  async getCategoryPerformance(): Promise<CategoryPerformance[]> {
-    const products = Array.from(this.products.values());
-    const categories = Array.from(new Set(products.map(p => p.category)));
-    
-    return categories.map(category => {
-      const categoryProducts = products.filter(p => p.category === category);
-      const sales = categoryProducts.reduce((sum, p) => sum + p.salesVolume, 0);
-      const revenue = categoryProducts.reduce((sum, p) => sum + (p.salesVolume * parseFloat(p.price)), 0);
-      const profitMargin = categoryProducts.reduce((sum, p) => sum + parseFloat(p.profitMargin), 0) / categoryProducts.length;
-      
-      return {
-        category,
-        sales,
-        revenue,
-        profitMargin,
-        growth: Math.random() * 40 + 5 // Mock growth
-      };
-    });
-  }
+    async createProduct(product: InsertProduct): Promise<Product> {
+        const result = await db.insert(products).values(product).returning();
+        return result[0];
+    }
 
-  async getGeographicData(): Promise<GeographicData[]> {
-    const locations = ['Mumbai', 'Delhi', 'Bangalore', 'Chennai', 'Kolkata', 'Pune'];
-    
-    return locations.map(location => ({
-      location,
-      sales: Math.floor(Math.random() * 50000 + 10000),
-      revenue: Math.floor(Math.random() * 1000000 + 200000),
-      conversionRate: Math.random() * 10 + 2
-    }));
-  }
+    async updateProduct(id: string, updates: Partial<Product>): Promise<Product | undefined> {
+        const result = await db.update(products).set(updates).where(eq(products.id, id)).returning();
+        return result[0];
+    }
 
-  // Chat methods
-  async getChatMessages(userId: string, limit = 50): Promise<ChatMessage[]> {
-    return Array.from(this.chatMessages.values())
-      .filter(m => m.userId === userId)
-      .sort((a, b) => b.timestamp.getTime() - a.timestamp.getTime())
-      .slice(0, limit);
-  }
+    async getProductsByCategory(category: string): Promise<Product[]> {
+        return db.select().from(products).where(eq(products.category, category));
+    }
 
-  async createChatMessage(insertMessage: InsertChatMessage): Promise<ChatMessage> {
-    const id = randomUUID();
-    const message: ChatMessage = { 
-      ...insertMessage,
-      userId: insertMessage.userId || null,
-      id, 
-      timestamp: new Date() 
-    };
-    this.chatMessages.set(id, message);
-    return message;
-  }
+    async getTrendingProducts(limit = 10): Promise<ProductWithMetrics[]> {
+        const result = await db.select().from(products).where(eq(products.trending, true)).orderBy(desc(products.salesVolume)).limit(limit);
+        return result.map(p => ({
+            ...p,
+            salesGrowth: 0,
+            revenueGrowth: 0,
+            competitivePosition: "leading"
+        }));
+    }
 
-  // Search methods
-  async searchProducts(query: string): Promise<Product[]> {
-    const lowerQuery = query.toLowerCase();
-    return Array.from(this.products.values()).filter(p => 
-      p.name.toLowerCase().includes(lowerQuery) ||
-      p.category.toLowerCase().includes(lowerQuery) ||
-      p.brand.toLowerCase().includes(lowerQuery)
-    );
-  }
+    async getTopProfitProducts(limit = 10): Promise<ProductWithMetrics[]> {
+        const result = await db.select().from(products).orderBy(desc(products.profitMargin)).limit(limit);
+        return result.map(p => ({
+            ...p,
+            salesGrowth: 0,
+            revenueGrowth: 0,
+            competitivePosition: "profitable"
+        }));
+    }
 
-  async getProductCount(): Promise<number> {
-    return this.products.size;
-  }
+    async getUnderperformingProducts(limit = 10): Promise<ProductWithMetrics[]> {
+        const result = await db.select().from(products).orderBy(products.salesVolume).limit(limit);
+        return result.map(p => ({
+            ...p,
+            salesGrowth: 0,
+            revenueGrowth: 0,
+            competitivePosition: "needs attention"
+        }));
+    }
+
+    async importProductsFromCsv(stream: Readable): Promise<number> {
+      return new Promise((resolve, reject) => {
+        const productsToInsert: InsertProduct[] = [];
+        stream
+          .pipe(csv())
+          .on("data", (row) => {
+            try {
+              const productData = insertProductSchema.parse({
+                name: row.name,
+                category: row.category,
+                brand: row.brand,
+                description: row.description || null,
+                price: String(row.price),
+                rating: String(row.rating),
+                profitMargin: String(row.profitMargin),
+                salesVolume: parseInt(row.salesVolume, 10),
+                stockLevel: parseInt(row.stock, 10), // 'stock' from CSV maps to 'stockLevel'
+                reviewCount: parseInt(row.reviewCount, 10),
+                trending: row.trending?.toLowerCase() === 'true',
+                competitorPrices: row.competitorPrices ? JSON.parse(row.competitorPrices) : {},
+                locationData: row.locationData ? JSON.parse(row.locationData) : {},
+                launchDate: row.launchDate ? new Date(row.launchDate) : new Date(),
+              });
+              productsToInsert.push(productData);
+            } catch (error) {
+              console.warn("Skipping invalid CSV row:", row, error);
+            }
+          })
+          .on("end", async () => {
+            if (productsToInsert.length > 0) {
+              await db.insert(products).values(productsToInsert);
+            }
+            resolve(productsToInsert.length);
+          })
+          .on("error", (error) => {
+            reject(error);
+          });
+      });
+    }
+
+    // Analytics methods
+    async getAnalytics(productId?: string, startDate?: Date, endDate?: Date): Promise<Analytics[]> {
+        const conditions = [];
+        if (productId) {
+            conditions.push(eq(analytics.productId, productId));
+        }
+        if (startDate) {
+            conditions.push(gte(analytics.date, startDate));
+        }
+        if (endDate) {
+            conditions.push(lte(analytics.date, endDate));
+        }
+
+        const query = db.select().from(analytics);
+        if (conditions.length > 0) {
+            query.where(and(...conditions));
+        }
+        return query;
+    }
+
+    async createAnalytics(analyticsData: InsertAnalytics): Promise<Analytics> {
+        const result = await db.insert(analytics).values(analyticsData).returning();
+        return result[0];
+    }
+
+    async getDashboardMetrics(): Promise<DashboardMetrics> {
+        // This is a simplified implementation. A real implementation would involve more complex queries.
+        const totalRevenueResult = await db.select({ total: sql`sum(${analytics.revenue})` }).from(analytics);
+        const totalProductsResult = await db.select({ count: sql`count(*)` }).from(products);
+        const avgProfitMarginResult = await db.select({ avg: sql`avg(${products.profitMargin})` }).from(products);
+        const avgRatingResult = await db.select({ avg: sql`avg(${products.rating})` }).from(products);
+
+        return {
+            totalRevenue: parseFloat(totalRevenueResult[0].total as string) || 0,
+            revenueGrowth: 0, // Placeholder
+            totalProducts: Number(totalProductsResult[0].count) || 0,
+            productGrowth: 0, // Placeholder
+            avgProfitMargin: parseFloat(avgProfitMarginResult[0].avg as string) || 0,
+            marginGrowth: 0, // Placeholder
+            avgRating: parseFloat(avgRatingResult[0].avg as string) || 0,
+            ratingGrowth: 0, // Placeholder
+        };
+    }
+
+    async getCategoryPerformance(): Promise<CategoryPerformance[]> {
+        const result = await db.select({
+            category: products.category,
+            sales: sql`sum(${products.salesVolume})`.as('sales'),
+            revenue: sql`sum(${products.salesVolume} * ${products.price})`.as('revenue'),
+            profitMargin: sql`avg(${products.profitMargin})`.as('profitMargin'),
+        }).from(products).groupBy(products.category);
+
+        return result.map(r => ({
+            ...r,
+            sales: Number(r.sales),
+            revenue: parseFloat(r.revenue as string),
+            profitMargin: parseFloat(r.profitMargin as string),
+            growth: 0 // Placeholder
+        }));
+    }
+
+    async getGeographicData(): Promise<GeographicData[]> {
+        // This would require location data in the database, which is not currently present.
+        return [];
+    }
+
+    // Chat methods
+    async getChatMessages(userId: string, limit = 50): Promise<ChatMessage[]> {
+        return db.select().from(chatMessages).where(eq(chatMessages.userId, userId)).orderBy(desc(chatMessages.timestamp)).limit(limit);
+    }
+
+    async createChatMessage(message: InsertChatMessage): Promise<ChatMessage> {
+        const result = await db.insert(chatMessages).values(message).returning();
+        return result[0];
+    }
+
+    // Search methods
+    async searchProducts(query: string): Promise<Product[]> {
+        return db.select().from(products).where(ilike(products.name, `%${query}%`));
+    }
+
+    async getProductCount(): Promise<number> {
+        const result = await db.select({ count: sql`count(*)` }).from(products);
+        return Number(result[0].count);
+    }
 }
 
-export const storage = new MemStorage();
+
+export const storage = new DrizzleStorage();
