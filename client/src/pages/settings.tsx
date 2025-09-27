@@ -67,7 +67,7 @@ export default function Settings() {
       return response.json();
     },
     onSuccess: (updatedUser) => {
-      login(updatedUser);
+      login();
       toast({
         title: "Profile updated",
         description: "Your profile has been successfully updated.",
@@ -116,61 +116,6 @@ export default function Settings() {
       title: "Data export",
       description: "Your data export has been initiated. You'll receive an email when ready.",
     });
-  };
-
-  const [csvFile, setCsvFile] = useState<File | null>(null);
-  const [isUploading, setIsUploading] = useState(false);
-
-  const handleFileChange = (e: React.ChangeEvent<HTMLInputElement>) => {
-    if (e.target.files) {
-      setCsvFile(e.target.files[0]);
-    }
-  };
-
-  const handleCsvImport = async () => {
-    if (!csvFile) {
-      toast({
-        title: "No file selected",
-        description: "Please select a CSV file to import.",
-        variant: "destructive",
-      });
-      return;
-    }
-
-    setIsUploading(true);
-    const formData = new FormData();
-    formData.append("file", csvFile);
-
-    try {
-      const response = await fetch("/api/products/import-csv", {
-        method: "POST",
-        body: formData,
-      });
-
-      const result = await response.json();
-
-      if (response.ok) {
-        toast({
-          title: "Import successful",
-          description: result.message,
-        });
-      } else {
-        throw new Error(result.message || "Failed to import CSV");
-      }
-    } catch (error: any) {
-      toast({
-        title: "Import failed",
-        description: error.message || "An unexpected error occurred.",
-        variant: "destructive",
-      });
-    } finally {
-      setIsUploading(false);
-      setCsvFile(null);
-      const fileInput = document.getElementById('csvFile') as HTMLInputElement;
-      if (fileInput) {
-        fileInput.value = '';
-      }
-    }
   };
 
   return (
@@ -362,59 +307,12 @@ export default function Settings() {
               </CardContent>
             </Card>
 
-            {/* Data Management */}
-            <Card>
-              <CardHeader>
-                <CardTitle>Data Management</CardTitle>
-                <CardDescription>
-                  Import and export your product data
-                </CardDescription>
-              </CardHeader>
-              <CardContent className="space-y-6">
-                <div>
-                  <Label htmlFor="csvFile" className="mb-2 block">Import Products from CSV</Label>
-                  <div className="flex flex-col sm:flex-row gap-2">
-                    <Input
-                      id="csvFile"
-                      type="file"
-                      accept=".csv"
-                      onChange={handleFileChange}
-                      className="flex-grow"
-                      data-testid="input-csv-file"
-                    />
-                    <Button
-                      onClick={handleCsvImport}
-                      disabled={isUploading || !csvFile}
-                      data-testid="button-import-csv"
-                    >
-                      {isUploading ? "Uploading..." : "Import CSV"}
-                    </Button>
-                  </div>
-                  <p className="text-sm text-muted-foreground mt-2">
-                    Upload a CSV file with your product data. The file should include columns: name, category, brand, price, rating, stock, salesVolume, profitMargin.
-                  </p>
-                </div>
-
-                <Separator />
-
-                <div className="flex flex-col sm:flex-row gap-4">
-                  <Button
-                    variant="outline"
-                    onClick={handleExportData}
-                    data-testid="button-export-data"
-                  >
-                    Download My Data
-                  </Button>
-                </div>
-              </CardContent>
-            </Card>
-
             {/* Data & Privacy */}
             <Card>
               <CardHeader>
-                <CardTitle>Account</CardTitle>
+                <CardTitle>Data & Privacy</CardTitle>
                 <CardDescription>
-                  Manage your privacy and account settings
+                  Manage your data and privacy preferences
                 </CardDescription>
               </CardHeader>
               <CardContent className="space-y-6">
@@ -435,6 +333,14 @@ export default function Settings() {
                 <Separator />
 
                 <div className="flex flex-col sm:flex-row gap-4">
+                  <Button
+                    variant="outline"
+                    onClick={handleExportData}
+                    data-testid="button-export-data"
+                  >
+                    Download My Data
+                  </Button>
+
                   <AlertDialog>
                     <AlertDialogTrigger asChild>
                       <Button

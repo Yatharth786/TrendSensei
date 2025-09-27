@@ -1,8 +1,9 @@
 import { sql } from "drizzle-orm";
-import { pgTable, text, varchar, integer, decimal, timestamp, boolean, jsonb } from "drizzle-orm/pg-core";
+import { pgTable, text, varchar, integer, decimal, timestamp, boolean } from "drizzle-orm/pg-core";
 import { createInsertSchema } from "drizzle-zod";
 import { z } from "zod";
 
+// USERS TABLE
 export const users = pgTable("users", {
   id: varchar("id").primaryKey().default(sql`gen_random_uuid()`),
   email: text("email").notNull().unique(),
@@ -11,32 +12,35 @@ export const users = pgTable("users", {
   lastName: text("last_name").notNull(),
   businessName: text("business_name"),
   location: text("location"),
-  subscriptionTier: text("subscription_tier").notNull().default("free"), // free, basic, premium
+  subscriptionTier: text("subscription_tier").notNull().default("free"),
   createdAt: timestamp("created_at").notNull().defaultNow(),
 });
 
+// PRODUCTS TABLE (NEW SCHEMA)
 export const products = pgTable("products", {
-  id: varchar("id").primaryKey().default(sql`gen_random_uuid()`),
-  name: text("name").notNull(),
+  product_id: varchar("product_id").primaryKey(),
+  date: timestamp("date").notNull(),
+  title: text("title").notNull(),
   category: text("category").notNull(),
-  brand: text("brand").notNull(),
-  description: text("description"),
   price: decimal("price", { precision: 10, scale: 2 }).notNull(),
-  competitorPrices: jsonb("competitor_prices").notNull(), // { amazon: 2999, flipkart: 2899 }
   rating: decimal("rating", { precision: 3, scale: 2 }).notNull(),
-  reviewCount: integer("review_count").notNull(),
-  salesVolume: integer("sales_volume").notNull(),
-  profitMargin: decimal("profit_margin", { precision: 5, scale: 2 }).notNull(),
-  stockLevel: integer("stock_level").notNull(),
-  locationData: jsonb("location_data").notNull(), // { mumbai: 150, delhi: 120 }
-  launchDate: timestamp("launch_date").notNull(),
-  trending: boolean("trending").notNull().default(false),
-  createdAt: timestamp("created_at").notNull().defaultNow(),
+  reviews: integer("reviews").notNull(),
+  availability: boolean("availability").notNull().default(true),
+  competitor_price: decimal("competitor_price", { precision: 10, scale: 2 }),
+  promotion_flag: boolean("promotion_flag").notNull().default(false),
+  estimated_demand: integer("estimated_demand").notNull(),
+  cost_price: decimal("cost_price", { precision: 10, scale: 2 }),
+  profit_margin: decimal("profit_margin", { precision: 5, scale: 2 }).notNull(),
+  event: text("event"),
+  event_impact: decimal("event_impact", { precision: 5, scale: 2 }),
+  ad_spend: decimal("ad_spend", { precision: 10, scale: 2 }),
+  market_share: decimal("market_share", { precision: 5, scale: 4 }),
 });
 
+// ANALYTICS TABLE
 export const analytics = pgTable("analytics", {
   id: varchar("id").primaryKey().default(sql`gen_random_uuid()`),
-  productId: varchar("product_id").references(() => products.id),
+  productId: varchar("product_id").references(() => products.product_id), // Corrected reference
   date: timestamp("date").notNull(),
   sales: integer("sales").notNull(),
   revenue: decimal("revenue", { precision: 12, scale: 2 }).notNull(),
@@ -45,6 +49,7 @@ export const analytics = pgTable("analytics", {
   location: text("location").notNull(),
 });
 
+// CHAT MESSAGES TABLE
 export const chatMessages = pgTable("chat_messages", {
   id: varchar("id").primaryKey().default(sql`gen_random_uuid()`),
   userId: varchar("user_id").references(() => users.id),
@@ -53,16 +58,14 @@ export const chatMessages = pgTable("chat_messages", {
   timestamp: timestamp("timestamp").notNull().defaultNow(),
 });
 
-// Insert schemas
+// --- ZOD SCHEMAS FOR INSERT ---
+
 export const insertUserSchema = createInsertSchema(users).omit({
   id: true,
   createdAt: true,
 });
 
-export const insertProductSchema = createInsertSchema(products).omit({
-  id: true,
-  createdAt: true,
-});
+export const insertProductSchema = createInsertSchema(products);
 
 export const insertAnalyticsSchema = createInsertSchema(analytics).omit({
   id: true,
@@ -73,7 +76,8 @@ export const insertChatMessageSchema = createInsertSchema(chatMessages).omit({
   timestamp: true,
 });
 
-// Types
+// --- INFERRED TYPES ---
+
 export type User = typeof users.$inferSelect;
 export type InsertUser = z.infer<typeof insertUserSchema>;
 
@@ -86,7 +90,8 @@ export type InsertAnalytics = z.infer<typeof insertAnalyticsSchema>;
 export type ChatMessage = typeof chatMessages.$inferSelect;
 export type InsertChatMessage = z.infer<typeof insertChatMessageSchema>;
 
-// Additional types for API responses
+// --- API RESPONSE TYPES ---
+
 export type ProductWithMetrics = Product & {
   salesGrowth: number;
   revenueGrowth: number;
