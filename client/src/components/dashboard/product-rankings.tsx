@@ -60,7 +60,7 @@ function ProductCard({ product, index, type }: ProductCardProps) {
     if (type === 'trending' || type === 'underperforming') {
       return `${product.salesGrowth >= 0 ? '+' : ''}${product.salesGrowth.toFixed(0)}%`;
     } else {
-      return `${product.profitMargin}%`;
+      return `${product.profit_margin}%`;
     }
   };
 
@@ -97,7 +97,7 @@ function ProductCard({ product, index, type }: ProductCardProps) {
         </div>
         <div>
           <p className="font-medium text-sm" data-testid={`text-product-name-${index}`}>
-            {product.name}
+            {product.title}
           </p>
           <p className="text-xs text-muted-foreground">
             {product.category}
@@ -157,7 +157,7 @@ function RankingSection({
           ) : products?.length ? (
             products.slice(0, 3).map((product, index) => (
               <ProductCard
-                key={product.id}
+                key={product.product_id}
                 product={product}
                 index={index}
                 type={type}
